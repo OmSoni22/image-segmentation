@@ -5,6 +5,7 @@ import torch
 import glob
 import numpy as np
 import os
+from utils import predict_img_loader
 import random
 from torchvision import transforms
 from PIL import Image
@@ -16,11 +17,6 @@ class detect_segmentation(object):
 		self.model_path = model_path
 		self.threshold=threshold
 		self.gpu=gpu
-		self.transforms_img = transforms.Compose([transforms.ColorJitter(brightness=0.8),
-                                         transforms.ToTensor(),
-                                         transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                                              std=[0.229, 0.224, 0.225])])
-
 
 		self.net = UNet(n_channels=3, n_classes=7)
 		self.load_model_para(self.model_path)		
@@ -36,13 +32,10 @@ class detect_segmentation(object):
 
 	def detect(self,img):
 		if self.gpu:
-			img = Image.fromarray(img)
-			img = self.transforms_img(img)
-			img = img.unsqueeze(0)
 			img = img.cuda()
 			
-		masks_pred = self.net(img)
-		return masks_pred.cpu().detach()
+		masks_pred = self.net(img).cpu().detach()
+		return masks_pred
 		
 
 def write_imgs(mask_dir,img_name,image,h,w):
@@ -53,26 +46,14 @@ def write_imgs(mask_dir,img_name,image,h,w):
 		os.makedirs(dir_path, exist_ok=True)
 		path=os.path.join(dir_path,img_name)
 		cv2.imwrite(path,img)
-		
-	final_mask = np.zeros_like(image[0, 0, :, :])
-	for i in range(0, image.shape[1]):
-		final_mask +=image[0, i, :, :] 
-	final_mask[final_mask>0] = 255 
- 
-	mask = np.logical_or(image[0, 0, :, :] >= 0.5, image[0, 1, :, :] >= 0.5)
-	black = np.zeros((image.shape[-2], image.shape[-1], 3), dtype=np.uint8)
-	black[mask] = np.array([255, 255, 255], dtype=np.uint8)
-	
-	dir_path =os.path.join(mask_dir,"result")
-	os.makedirs(dir_path, exist_ok=True)
-	path=os.path.join(dir_path,img_name)
-	cv2.imwrite(path,black) 
-		
+
 
 if __name__ == '__main__':
 	model_path="./TrainwtBeta02/best_CP.pth"
+
 	ds=detect_segmentation(model_path, gpu=True)
-	
+	pg=predict_img_loader.predict_img_generator(500,batch_size=32)
+
 	image_dir= "./data/test/imgs"
 	mask_dir= "./data/test/pred_mask_dir"
 
@@ -81,10 +62,9 @@ if __name__ == '__main__':
 	for image_path in tqdm(image_paths):
 		img_name=image_path.split("/")[-1]
 		
-		img = cv2.imread(image_path)
-		h, w = img.shape[:2]
-
-		masks=ds.detect(img)
+		img_stack,h,w,nh,nw=pg.generate_img_stack(image_path)
+		
+		masks=ds.detect(img_stack)
 		mask=masks.numpy()
 		
 		mask[mask>=0.5]=255
